@@ -1,0 +1,46 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+LAYOUT_WITH_LEGEND()
+
+title Архитектура данных AdScale (TO-BE)
+
+Container(adsel, "Ad Selection", "Go")
+Container(bid, "Bidding", "C++")
+Container(tracking, "Tracking", "Go")
+Container(campaign, "Campaign", "Go")
+Container(finance, "Finance", "Go")
+Container(stats, "Statistics", "Python")
+Container(analytics, "Analytics", "Python")
+Container(bff, "Dashboard BFF", "Node.js")
+
+ContainerDb(redisHot, "Redis Cluster (горячий путь)", "Redis, шарды master+replica", "Кампании, бюджеты, frequency cap, профили")
+ContainerDb(redisBff, "Redis (кеш BFF)", "Redis", "Кеш отчётов, allkeys-lru")
+ContainerDb(campaignDb, "Campaign DB", "PostgreSQL, master + 2 read replicas", "Кампании, креативы, таргетинг")
+ContainerDb(financeDb, "Finance DB", "PostgreSQL, master + sync replica + async DR replica", "Проводки, балансы, счета, outbox")
+ContainerDb(statsDb, "Statistics DB", "ClickHouse, шарды по campaign_id, 2 реплики", "События и агрегаты")
+ContainerDb(analyticsDb, "Analytics DB", "ClickHouse", "Витрины для отчётов")
+ContainerQueue(kafka, "Kafka", "RF=3, Avro + Schema Registry", "auction-results, impressions, clicks, campaign-changes, budget-events, balance-changes")
+
+Rel(adsel, redisHot, "Чтение профилей и кампаний")
+Rel(bid, redisHot, "Чтение кампаний, резерв бюджета")
+Rel(bid, kafka, "auction-results")
+Rel(tracking, kafka, "impressions, clicks")
+
+Rel(campaign, campaignDb, "Запись")
+Rel(campaign, redisHot, "Write-through")
+Rel(campaign, kafka, "campaign-changes")
+
+Rel(finance, kafka, "Читает impressions, clicks; пишет budget-events, balance-changes")
+Rel(finance, financeDb, "Транзакции, идемпотентность по event_id")
+Rel(finance, redisHot, "Дневные лимиты бюджетов")
+
+Rel(stats, kafka, "Читает события")
+Rel(stats, statsDb, "Пакетная вставка")
+Rel(analytics, kafka, "Читает события и campaign-changes")
+Rel(analytics, analyticsDb, "Витрины")
+
+Rel(bff, campaign, "REST")
+Rel(bff, finance, "REST")
+Rel(bff, analytics, "REST")
+Rel(bff, redisBff, "Кеш отчётов")
+@enduml

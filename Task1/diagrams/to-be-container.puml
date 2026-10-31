@@ -1,0 +1,72 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+LAYOUT_WITH_LEGEND()
+LAYOUT_LEFT_RIGHT()
+
+title C4 Container Diagram — AdScale (TO-BE, через год)
+
+Person(advertiser, "Рекламодатель", "Управляет кампаниями, бюджетом и отчётами")
+Person_Ext(endUser, "Пользователь сайта/приложения", "Видит рекламу, кликает")
+System_Ext(dsp, "DSP-площадки", "Отправляют bid requests по OpenRTB")
+System_Ext(payment, "Платёжный шлюз", "Пополнение баланса")
+
+System_Boundary(adscale, "AdScale") {
+  Container(gw, "API Gateway", "Envoy", "Аутентификация DSP, rate limiting, маршрутизация, circuit breaker, метрики latency")
+  Container(adsel, "Ad Selection Service", "Go", "Определение пользователя, подбор кандидатов")
+  Container(bid, "Bidding Service", "C++", "Аукцион, расчёт ставки, проверка бюджета")
+  Container(delivery, "Delivery Service", "Go", "Формирование разметки ответа")
+  Container(tracking, "Tracking Service", "Go", "Приём событий показов и кликов")
+  Container(campaign, "Campaign Service", "Go", "Кампании, креативы, таргетинг")
+  Container(finance, "Finance Service", "Go", "Списания, балансы, счета")
+  Container(stats, "Statistics Service", "Python", "Агрегация событий")
+  Container(analytics, "Analytics Service", "Python", "Отчёты и аналитика")
+  Container(ui, "Advertiser Dashboard", "JavaScript SPA", "Кабинет рекламодателя")
+  Container(bff, "Dashboard BFF", "Node.js", "API для кабинета")
+
+  ContainerQueue(kafka, "Kafka", "Apache Kafka", "impressions, clicks, auction-results, spend, campaign-changes")
+  ContainerDb(redis, "Redis Cluster", "Redis", "Кеш кампаний и профилей, счётчики бюджетов")
+  ContainerDb(campaignDb, "Campaign DB", "PostgreSQL + read replicas", "Кампании, креативы, таргетинг")
+  ContainerDb(financeDb, "Finance DB", "PostgreSQL + sync replica", "Балансы, списания, счета")
+  ContainerDb(olap, "Analytics Store", "ClickHouse", "События и агрегаты для отчётов")
+}
+
+Rel(dsp, gw, "Bid request / response", "HTTPS, OpenRTB")
+Rel(gw, adsel, "Запрос на ставку", "gRPC")
+Rel(adsel, redis, "Профили, кампании", "Redis")
+Rel(adsel, bid, "Кандидаты", "gRPC")
+Rel(bid, redis, "Кампании, бюджеты, атомарное резервирование", "Redis")
+Rel(bid, delivery, "Победитель аукциона", "gRPC")
+Rel(bid, kafka, "Результаты аукциона", "async")
+
+Rel(endUser, tracking, "Показы и клики", "HTTPS")
+Rel(tracking, kafka, "События", "async")
+
+Rel(stats, kafka, "Читает события", "consumer")
+Rel(stats, olap, "Агрегаты", "batch insert")
+Rel(analytics, olap, "Запросы отчётов", "SQL")
+
+Rel(finance, kafka, "Читает списания", "consumer")
+Rel(finance, financeDb, "Транзакции", "SQL")
+Rel(finance, payment, "Платежи", "HTTPS/REST")
+
+Rel(campaign, campaignDb, "CRUD", "SQL")
+Rel(campaign, redis, "Обновление кеша", "Redis")
+Rel(campaign, kafka, "Изменения кампаний", "async")
+
+Rel(advertiser, ui, "Работает в кабинете", "HTTPS")
+Rel(ui, bff, "API", "REST/JSON")
+Rel(bff, campaign, "Кампании", "REST")
+Rel(bff, finance, "Баланс, счета", "REST")
+Rel(bff, analytics, "Отчёты", "REST")
+
+note right of bid
+  Горячий путь без обращений в БД.
+  Масштабируется горизонтально.
+  При сбое зависимостей отвечает no-bid
+end note
+
+note bottom of kafka
+  Развязывает аукцион и запись событий.
+  Аукцион не ждёт обработки статистики и финансов
+end note
+@enduml

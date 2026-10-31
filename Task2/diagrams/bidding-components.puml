@@ -1,0 +1,33 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+LAYOUT_WITH_LEGEND()
+
+title C4 Component — Bidding Service
+
+Container(adsel, "Ad Selection Service", "Go", "Передаёт кандидатов")
+ContainerDb(redis, "Redis Cluster", "Redis", "Кампании, бюджеты, frequency cap")
+ContainerQueue(kafka, "Kafka", "Apache Kafka", "auction-results, campaign-changes")
+
+Container_Boundary(bidding, "Bidding Service") {
+  Component(api, "gRPC API", "gRPC server", "Приём запросов, контроль дедлайна")
+  Component(rules, "Rules Engine", "C++", "Floor price, frequency cap, пейсинг, таргетинг")
+  Component(pricer, "Bid Calculator", "C++", "Расчёт ставок, выбор победителя")
+  Component(budget, "Budget Reserver", "C++, Lua в Redis", "Атомарное резервирование бюджета")
+  Component(snapshot, "Campaign Snapshot", "In-memory", "Локальный снимок кампаний для деградации")
+  Component(cb, "Circuit Breaker", "C++", "Защита вызовов к Redis")
+  Component(publisher, "Event Publisher", "Kafka producer", "Асинхронная отправка результатов, буфер")
+  Component(metrics, "Metrics & Health", "Prometheus exporter", "Latency, no-bid по причинам, health checks")
+}
+
+Rel(adsel, api, "Bid()", "gRPC")
+Rel(api, rules, "Кандидаты")
+Rel(rules, pricer, "Допущенные кандидаты")
+Rel(pricer, budget, "Резерв под ставку")
+Rel(rules, cb, "Чтение данных")
+Rel(budget, cb, "Резервирование")
+Rel(cb, redis, "Запросы", "Redis")
+Rel(cb, snapshot, "Fallback при сбое Redis")
+Rel(snapshot, kafka, "Обновление по campaign-changes", "consumer")
+Rel(pricer, publisher, "Результат аукциона")
+Rel(publisher, kafka, "auction-results", "async")
+@enduml

@@ -1,0 +1,47 @@
+@startuml
+title Потоки событий в Kafka
+
+left to right direction
+
+rectangle "Bidding" as BID
+rectangle "Tracking" as TR
+rectangle "Campaign" as CMP
+rectangle "Finance" as FIN
+
+queue "auction-results\n96 партиций, 3 дня" as T1
+queue "impressions\n48 партиций, 7 дней" as T2
+queue "clicks\n12 партиций, 7 дней" as T3
+queue "campaign-changes\ncompacted" as T4
+queue "budget-events\ncompacted" as T5
+queue "balance-changes\n30 дней" as T6
+
+rectangle "stats-aggregator\n(Statistics)" as G1
+rectangle "analytics-loader\n(Analytics)" as G2
+rectangle "finance-billing\n(Finance)" as G3
+rectangle "finance-reconciler\n(Finance)" as G4
+rectangle "profile-updater\n(Ad Selection)" as G5
+rectangle "bidding-snapshot-*\n(Bidding)" as G6
+rectangle "BFF\n(балансы)" as G7
+
+BID --> T1
+TR --> T2
+TR --> T3
+CMP --> T4
+FIN --> T5
+FIN --> T6
+
+T1 --> G1
+T1 --> G4
+T2 --> G1
+T2 --> G2
+T2 --> G3
+T2 --> G5
+T3 --> G1
+T3 --> G2
+T3 --> G3
+T3 --> G5
+T4 --> G2
+T4 --> G6
+T5 --> G6
+T6 --> G7
+@enduml
