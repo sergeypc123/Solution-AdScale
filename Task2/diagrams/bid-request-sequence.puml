@@ -1,0 +1,46 @@
+@startuml
+title Обработка запроса на ставку (OpenRTB)
+
+participant "DSP" as DSP
+participant "API Gateway\n(Envoy)" as GW
+participant "Ad Selection" as AS
+participant "Bidding Service" as BID
+database "Redis" as R
+participant "Delivery" as DEL
+queue "Kafka" as K
+
+DSP -> GW : POST /openrtb/2.6/{dsp_id}/bid
+activate GW
+GW -> GW : mTLS + API-ключ,\nrate limit, таймаут 70 мс
+alt лимит превышен или размыкатель открыт
+  GW --> DSP : 204 No Content (no-bid)
+else
+  GW -> AS : gRPC SelectAds(deadline)
+  activate AS
+  AS -> R : профиль пользователя,\nактивные кампании
+  R --> AS
+  AS -> BID : gRPC Bid(candidates, deadline)
+  activate BID
+  BID -> R : данные кампаний, frequency cap
+  R --> BID
+  BID -> BID : правила, расчёт ставок,\nвыбор победителя
+  BID -> R : Lua: проверить и\nзарезервировать бюджет
+  R --> BID : reservation_id
+  BID ->> K : auction-results (async)
+  BID --> AS : Bid / NoBid
+  deactivate BID
+  alt есть ставка
+    AS -> DEL : gRPC Render(creative)
+    DEL --> AS : разметка (adm)
+  end
+  AS --> GW : ответ
+  deactivate AS
+  GW --> DSP : 200 BidResponse / 204 no-bid
+end
+deactivate GW
+
+note over GW, DEL
+  Если дедлайн истёк на любом шаге,
+  сервис сразу возвращает no-bid
+end note
+@enduml
